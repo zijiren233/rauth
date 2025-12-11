@@ -10,7 +10,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"github.com/zijiren233/rauth/pkg/auth"
 )
 
@@ -25,6 +24,7 @@ func TestNewTokenGenerator(t *testing.T) {
 			name: "with provided private key",
 			option: func() *auth.TokenOption {
 				key, _ := rsa.GenerateKey(rand.Reader, 2048)
+
 				return &auth.TokenOption{
 					Issuer:     "test-issuer",
 					Service:    "test-service",
@@ -121,9 +121,13 @@ func TestGenerateToken(t *testing.T) {
 			assert.NotEmpty(t, tokenString)
 
 			// Parse and verify the token
-			token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-				return &privateKey.PublicKey, nil
-			})
+			token, err := jwt.ParseWithClaims(
+				tokenString,
+				&auth.Claims{},
+				func(token *jwt.Token) (any, error) {
+					return &privateKey.PublicKey, nil
+				},
+			)
 			require.NoError(t, err)
 			assert.True(t, token.Valid)
 
@@ -153,9 +157,13 @@ func TestGenerateToken_Expiration(t *testing.T) {
 	tokenString, err := generator.GenerateToken("test-user", nil)
 	require.NoError(t, err)
 
-	token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return &privateKey.PublicKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&auth.Claims{},
+		func(token *jwt.Token) (any, error) {
+			return &privateKey.PublicKey, nil
+		},
+	)
 	require.NoError(t, err)
 
 	claims := token.Claims.(*auth.Claims)
@@ -291,7 +299,8 @@ func TestTokenResponse_ToJSON(t *testing.T) {
 	jsonBytes, err := response.ToJSON()
 	require.NoError(t, err)
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
+
 	err = json.Unmarshal(jsonBytes, &parsed)
 	require.NoError(t, err)
 
@@ -314,13 +323,13 @@ func TestTokenSignatureVerification(t *testing.T) {
 	tokenString, _ := generator.GenerateToken("test-user", nil)
 
 	// Should verify with correct public key
-	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		return &privateKey1.PublicKey, nil
 	})
 	assert.NoError(t, err)
 
 	// Should fail with wrong public key
-	_, err = jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	_, err = jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		return &privateKey2.PublicKey, nil
 	})
 	assert.Error(t, err)
@@ -338,6 +347,7 @@ func TestAccessStructSerialization(t *testing.T) {
 	require.NoError(t, err)
 
 	var parsed auth.Access
+
 	err = json.Unmarshal(jsonBytes, &parsed)
 	require.NoError(t, err)
 

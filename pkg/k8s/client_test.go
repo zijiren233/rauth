@@ -6,11 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zijiren233/rauth/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/zijiren233/rauth/pkg/k8s"
 )
 
 // createTestSecret creates a test secret for testing
@@ -209,9 +208,11 @@ func TestExtractCredentials(t *testing.T) {
 
 			if tt.wantErr {
 				assert.Error(t, err)
+
 				if tt.errContains != "" {
 					assert.Contains(t, err.Error(), tt.errContains)
 				}
+
 				return
 			}
 
@@ -224,7 +225,7 @@ func TestExtractCredentials(t *testing.T) {
 
 // TestDefaultSecretName tests that the default secret name constant is correct
 func TestDefaultSecretName(t *testing.T) {
-	assert.Equal(t, "registry-credentials", k8s.DefaultSecretName)
+	assert.Equal(t, "devbox-registry", k8s.DefaultSecretName)
 }
 
 // TestClientInterface_Compliance tests that Client implements ClientInterface

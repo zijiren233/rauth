@@ -4,19 +4,17 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zijiren233/rauth/pkg/auth"
+	"github.com/zijiren233/rauth/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/zijiren233/rauth/pkg/auth"
-	"github.com/zijiren233/rauth/pkg/k8s"
 )
 
 // setupTestAuthenticator creates an authenticator for testing
@@ -45,7 +43,8 @@ func setupTestAuthenticator(t *testing.T, secrets ...*corev1.Secret) *auth.Authe
 	})
 	require.NoError(t, err)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
+
 	return auth.NewAuthenticator(k8sClient, generator, logger)
 }
 
@@ -316,8 +315,10 @@ func TestAuthResult_Fields(t *testing.T) {
 	result := &auth.AuthResult{
 		Authenticated: true,
 		Subject:       "user",
-		Access:        []auth.Access{{Type: "repository", Name: "ns/img", Actions: []string{"pull"}}},
-		Error:         nil,
+		Access: []auth.Access{
+			{Type: "repository", Name: "ns/img", Actions: []string{"pull"}},
+		},
+		Error: nil,
 	}
 
 	assert.True(t, result.Authenticated)

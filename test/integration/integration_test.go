@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +16,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"github.com/zijiren233/rauth/pkg/auth"
 	"github.com/zijiren233/rauth/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
@@ -52,12 +50,12 @@ func SetupIntegrationTest(t *testing.T) *IntegrationTestSuite {
 	require.NoError(t, err)
 
 	// Create logger
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 
 	// Create K8s client wrapper
 	k8sClient := &fakeK8sClient{
 		clientset:  clientset,
-		secretName: "registry-credentials",
+		secretName: "devbox-registry",
 	}
 
 	// Create authenticator
@@ -92,10 +90,13 @@ func (s *IntegrationTestSuite) Cleanup() {
 }
 
 // CreateNamespaceSecret creates a secret in the fake K8s cluster
-func (s *IntegrationTestSuite) CreateNamespaceSecret(t *testing.T, namespace, username, password string) {
+func (s *IntegrationTestSuite) CreateNamespaceSecret(
+	t *testing.T,
+	namespace, username, password string,
+) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "registry-credentials",
+			Name:      "devbox-registry",
 			Namespace: namespace,
 		},
 		Data: map[string][]byte{
@@ -118,8 +119,13 @@ type fakeK8sClient struct {
 	secretName string
 }
 
-func (c *fakeK8sClient) GetNamespaceCredentials(ctx context.Context, namespace string) (*k8s.RegistryCredentials, error) {
-	secret, err := c.clientset.CoreV1().Secrets(namespace).Get(ctx, c.secretName, metav1.GetOptions{})
+func (c *fakeK8sClient) GetNamespaceCredentials(
+	ctx context.Context,
+	namespace string,
+) (*k8s.RegistryCredentials, error) {
+	secret, err := c.clientset.CoreV1().
+		Secrets(namespace).
+		Get(ctx, c.secretName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +201,12 @@ func extractBasicAuth(r *http.Request) (string, string, bool) {
 		return "", "", false
 	}
 
-	for i := 0; i < len(decoded); i++ {
+	for i := range decoded {
 		if decoded[i] == ':' {
 			return string(decoded[:i]), string(decoded[i+1:]), true
 		}
 	}
+
 	return "", "", false
 }
 
@@ -239,11 +246,13 @@ func TestIntegration_FullAuthenticationFlow(t *testing.T) {
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var tokenResp map[string]interface{}
+	var tokenResp map[string]any
+
 	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 	require.NoError(t, err)
 
@@ -252,9 +261,13 @@ func TestIntegration_FullAuthenticationFlow(t *testing.T) {
 	assert.NotEmpty(t, tokenString)
 
 	// Parse and validate the JWT token
-	token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return &suite.privateKey.PublicKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&auth.Claims{},
+		func(token *jwt.Token) (any, error) {
+			return &suite.privateKey.PublicKey, nil
+		},
+	)
 	require.NoError(t, err)
 	assert.True(t, token.Valid)
 
@@ -345,7 +358,11 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := http.NewRequest(
 				http.MethodGet,
-				fmt.Sprintf("%s/token?service=test-registry.io&scope=repository:%s/app:pull", suite.server.URL, tc.targetNS),
+				fmt.Sprintf(
+					"%s/token?service=test-registry.io&scope=repository:%s/app:pull",
+					suite.server.URL,
+					tc.targetNS,
+				),
 				nil,
 			)
 			require.NoError(t, err)
@@ -353,6 +370,7 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 
 			resp, err := client.Do(req)
 			require.NoError(t, err)
+
 			defer resp.Body.Close()
 
 			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
@@ -380,17 +398,23 @@ func TestIntegration_TokenExpiration(t *testing.T) {
 	beforeRequest := time.Now()
 	resp, err := client.Do(req)
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	var tokenResp map[string]interface{}
+	var tokenResp map[string]any
+
 	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 	require.NoError(t, err)
 
 	tokenString := tokenResp["token"].(string)
 
-	token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return &suite.privateKey.PublicKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&auth.Claims{},
+		func(token *jwt.Token) (any, error) {
+			return &suite.privateKey.PublicKey, nil
+		},
+	)
 	require.NoError(t, err)
 
 	claims := token.Claims.(*auth.Claims)
@@ -419,12 +443,14 @@ func TestIntegration_HealthEndpoints(t *testing.T) {
 		t.Run(endpoint, func(t *testing.T) {
 			resp, err := client.Get(suite.server.URL + endpoint)
 			require.NoError(t, err)
+
 			defer resp.Body.Close()
 
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 			assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 
 			var health map[string]string
+
 			err = json.NewDecoder(resp.Body).Decode(&health)
 			require.NoError(t, err)
 			assert.Equal(t, "healthy", health["status"])
@@ -472,7 +498,11 @@ func TestIntegration_PullAndPushActions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := http.NewRequest(
 				http.MethodGet,
-				fmt.Sprintf("%s/token?service=test-registry.io&scope=%s", suite.server.URL, tc.scope),
+				fmt.Sprintf(
+					"%s/token?service=test-registry.io&scope=%s",
+					suite.server.URL,
+					tc.scope,
+				),
 				nil,
 			)
 			require.NoError(t, err)
@@ -480,19 +510,25 @@ func TestIntegration_PullAndPushActions(t *testing.T) {
 
 			resp, err := client.Do(req)
 			require.NoError(t, err)
+
 			defer resp.Body.Close()
 
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-			var tokenResp map[string]interface{}
+			var tokenResp map[string]any
+
 			err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 			require.NoError(t, err)
 
 			tokenString := tokenResp["token"].(string)
 
-			token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-				return &suite.privateKey.PublicKey, nil
-			})
+			token, err := jwt.ParseWithClaims(
+				tokenString,
+				&auth.Claims{},
+				func(token *jwt.Token) (any, error) {
+					return &suite.privateKey.PublicKey, nil
+				},
+			)
 			require.NoError(t, err)
 
 			claims := token.Claims.(*auth.Claims)
@@ -533,7 +569,11 @@ func TestIntegration_NestedImagePaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := http.NewRequest(
 				http.MethodGet,
-				fmt.Sprintf("%s/token?service=test-registry.io&scope=repository:%s:pull", suite.server.URL, tc.imagePath),
+				fmt.Sprintf(
+					"%s/token?service=test-registry.io&scope=repository:%s:pull",
+					suite.server.URL,
+					tc.imagePath,
+				),
 				nil,
 			)
 			require.NoError(t, err)
@@ -541,19 +581,25 @@ func TestIntegration_NestedImagePaths(t *testing.T) {
 
 			resp, err := client.Do(req)
 			require.NoError(t, err)
+
 			defer resp.Body.Close()
 
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-			var tokenResp map[string]interface{}
+			var tokenResp map[string]any
+
 			err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 			require.NoError(t, err)
 
 			tokenString := tokenResp["token"].(string)
 
-			token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-				return &suite.privateKey.PublicKey, nil
-			})
+			token, err := jwt.ParseWithClaims(
+				tokenString,
+				&auth.Claims{},
+				func(token *jwt.Token) (any, error) {
+					return &suite.privateKey.PublicKey, nil
+				},
+			)
 			require.NoError(t, err)
 
 			claims := token.Claims.(*auth.Claims)
@@ -582,19 +628,25 @@ func TestIntegration_EmptyScope(t *testing.T) {
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var tokenResp map[string]interface{}
+	var tokenResp map[string]any
+
 	err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 	require.NoError(t, err)
 
 	tokenString := tokenResp["token"].(string)
 
-	token, err := jwt.ParseWithClaims(tokenString, &auth.Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return &suite.privateKey.PublicKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&auth.Claims{},
+		func(token *jwt.Token) (any, error) {
+			return &suite.privateKey.PublicKey, nil
+		},
+	)
 	require.NoError(t, err)
 
 	claims := token.Claims.(*auth.Claims)
@@ -608,7 +660,7 @@ func TestIntegration_ConcurrentMultiTenant(t *testing.T) {
 
 	// Create many namespace secrets
 	numTenants := 10
-	for i := 0; i < numTenants; i++ {
+	for i := range numTenants {
 		ns := fmt.Sprintf("tenant-%d", i)
 		suite.CreateNamespaceSecret(t, ns, ns+"-user", ns+"-pass")
 	}
@@ -618,19 +670,25 @@ func TestIntegration_ConcurrentMultiTenant(t *testing.T) {
 	// Run concurrent requests
 	results := make(chan error, numTenants*5)
 
-	for i := 0; i < numTenants; i++ {
-		for j := 0; j < 5; j++ {
+	for i := range numTenants {
+		for range 5 {
 			go func(tenantID int) {
 				ns := fmt.Sprintf("tenant-%d", tenantID)
+
 				req, err := http.NewRequest(
 					http.MethodGet,
-					fmt.Sprintf("%s/token?service=test-registry.io&scope=repository:%s/app:pull", suite.server.URL, ns),
+					fmt.Sprintf(
+						"%s/token?service=test-registry.io&scope=repository:%s/app:pull",
+						suite.server.URL,
+						ns,
+					),
 					nil,
 				)
 				if err != nil {
 					results <- err
 					return
 				}
+
 				req.Header.Set("Authorization", basicAuth(ns+"-user", ns+"-pass"))
 
 				resp, err := client.Do(req)
@@ -644,13 +702,14 @@ func TestIntegration_ConcurrentMultiTenant(t *testing.T) {
 					results <- fmt.Errorf("unexpected status %d for tenant %d", resp.StatusCode, tenantID)
 					return
 				}
+
 				results <- nil
 			}(i)
 		}
 	}
 
 	// Collect results
-	for i := 0; i < numTenants*5; i++ {
+	for range numTenants * 5 {
 		err := <-results
 		assert.NoError(t, err)
 	}
@@ -667,7 +726,7 @@ func TestIntegration_TokenUniqueness(t *testing.T) {
 
 	tokens := make(map[string]bool)
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		req, err := http.NewRequest(
 			http.MethodGet,
 			suite.server.URL+"/token?service=test-registry.io&scope=repository:test/app:pull",
@@ -679,7 +738,8 @@ func TestIntegration_TokenUniqueness(t *testing.T) {
 		resp, err := client.Do(req)
 		require.NoError(t, err)
 
-		var tokenResp map[string]interface{}
+		var tokenResp map[string]any
+
 		err = json.NewDecoder(resp.Body).Decode(&tokenResp)
 		resp.Body.Close()
 		require.NoError(t, err)

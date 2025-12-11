@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,7 +20,11 @@ type Authenticator struct {
 }
 
 // NewAuthenticator creates a new authenticator
-func NewAuthenticator(k8sClient k8s.ClientInterface, generator *TokenGenerator, logger *slog.Logger) *Authenticator {
+func NewAuthenticator(
+	k8sClient k8s.ClientInterface,
+	generator *TokenGenerator,
+	logger *slog.Logger,
+) *Authenticator {
 	return &Authenticator{
 		k8sClient: k8sClient,
 		generator: generator,
@@ -58,14 +63,18 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 		a.logger.Warn("authentication failed: namespace not found",
 			"username", req.Username,
 			"error", err)
-		result.Error = fmt.Errorf("authentication failed: invalid credentials")
+
+		result.Error = errors.New("authentication failed: invalid credentials")
+
 		return result
 	}
 
 	if !a.verifyCredentials(req.Username, req.Password, creds) {
 		a.logger.Warn("authentication failed: invalid password",
 			"username", req.Username)
-		result.Error = fmt.Errorf("authentication failed: invalid credentials")
+
+		result.Error = errors.New("authentication failed: invalid credentials")
+
 		return result
 	}
 
@@ -80,6 +89,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 	// If no scope, return empty access (e.g., docker login)
 	if req.Scope == "" {
 		a.logger.Info("no scope requested, returning empty access")
+
 		result.Access = []Access{}
 		return result
 	}
@@ -91,6 +101,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 			"scope", req.Scope,
 			"error", err)
 		result.Error = fmt.Errorf("invalid scope: %w", err)
+
 		return result
 	}
 
@@ -108,6 +119,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 			"username", req.Username,
 			"repository", access.Name)
 		result.Error = fmt.Errorf("access denied: unauthorized for repository %s", access.Name)
+
 		return result
 	}
 
@@ -121,7 +133,10 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 }
 
 // verifyCredentials verifies username and password against stored credentials
-func (a *Authenticator) verifyCredentials(username, password string, creds *k8s.RegistryCredentials) bool {
+func (a *Authenticator) verifyCredentials(
+	username, password string,
+	creds *k8s.RegistryCredentials,
+) bool {
 	// Use constant-time comparison to prevent timing attacks
 	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte(creds.Username)) == 1
 	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(creds.Password)) == 1
@@ -145,7 +160,7 @@ func (a *Authenticator) authorizeAccess(username string, requested *Access) bool
 // GenerateToken generates a token for the authenticated user
 func (a *Authenticator) GenerateToken(result *AuthResult) (*TokenResponse, error) {
 	if !result.Authenticated {
-		return nil, fmt.Errorf("user not authenticated")
+		return nil, errors.New("user not authenticated")
 	}
 
 	token, err := a.generator.GenerateToken(result.Subject, result.Access)

@@ -63,6 +63,7 @@ func (h *Handler) TokenHandler(w http.ResponseWriter, r *http.Request) {
 			"username", username,
 			"error", result.Error)
 		h.unauthorizedResponse(w, "authentication failed")
+
 		return
 	}
 
@@ -100,6 +101,7 @@ func (h *Handler) extractBasicAuth(r *http.Request) (username, password string, 
 	}
 
 	encoded := strings.TrimPrefix(authHeader, "Basic ")
+
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", "", false

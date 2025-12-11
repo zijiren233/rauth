@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,13 +14,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-
 	"github.com/zijiren233/rauth/pkg/auth"
 	"github.com/zijiren233/rauth/pkg/handler"
 	"github.com/zijiren233/rauth/pkg/k8s"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // mockK8sClient implements k8s.ClientInterface for testing
@@ -55,8 +53,13 @@ func newMockK8sClient(secretName string, secrets ...*corev1.Secret) *mockK8sClie
 	}
 }
 
-func (c *mockK8sClient) GetNamespaceCredentials(ctx context.Context, namespace string) (*k8s.RegistryCredentials, error) {
-	secret, err := c.clientset.CoreV1().Secrets(namespace).Get(ctx, c.secretName, metav1.GetOptions{})
+func (c *mockK8sClient) GetNamespaceCredentials(
+	ctx context.Context,
+	namespace string,
+) (*k8s.RegistryCredentials, error) {
+	secret, err := c.clientset.CoreV1().
+		Secrets(namespace).
+		Get(ctx, c.secretName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +87,9 @@ func setupTestHandler(t *testing.T, secrets ...*corev1.Secret) *handler.Handler 
 	})
 	require.NoError(t, err)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	authenticator := auth.NewAuthenticator(k8sClient, generator, logger)
+
 	return handler.NewHandler(authenticator, logger)
 }
 
@@ -114,7 +118,11 @@ func TestTokenHandler_Success(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 	rr := httptest.NewRecorder()
@@ -122,7 +130,8 @@ func TestTokenHandler_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -136,7 +145,11 @@ func TestTokenHandler_InvalidCredentials(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "correct-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "wrong-password"))
 
 	rr := httptest.NewRecorder()
@@ -145,7 +158,8 @@ func TestTokenHandler_InvalidCredentials(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Header().Get("WWW-Authenticate"), "Basic")
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "unauthorized", response["error"])
@@ -156,7 +170,11 @@ func TestTokenHandler_MissingAuth(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	// No Authorization header
 
 	rr := httptest.NewRecorder()
@@ -198,7 +216,11 @@ func TestTokenHandler_InvalidAuthHeader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope=repository:team-a/myapp:pull",
+				nil,
+			)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -216,7 +238,11 @@ func TestTokenHandler_NamespaceNotFound(t *testing.T) {
 	// No secrets created
 	h := setupTestHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:nonexistent/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:nonexistent/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("user", "pass"))
 
 	rr := httptest.NewRecorder()
@@ -232,7 +258,11 @@ func TestTokenHandler_CrossNamespaceAccess(t *testing.T) {
 	h := setupTestHandler(t, secretA, secretB)
 
 	// Team-A trying to access Team-B's image
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-b/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-b/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "password-a"))
 
 	rr := httptest.NewRecorder()
@@ -256,7 +286,8 @@ func TestTokenHandler_EmptyScope(t *testing.T) {
 	// Empty scope should succeed (for catalog access, etc.)
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.NotEmpty(t, response["token"])
@@ -267,7 +298,11 @@ func TestTokenHandler_MultipleActions(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull,push", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull,push",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 	rr := httptest.NewRecorder()
@@ -275,7 +310,8 @@ func TestTokenHandler_MultipleActions(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.NotEmpty(t, response["token"])
@@ -312,7 +348,8 @@ func TestHealthHandler(t *testing.T) {
 			assert.Equal(t, http.StatusOK, rr.Code)
 			assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
 
-			var response map[string]interface{}
+			var response map[string]any
+
 			err := json.Unmarshal(rr.Body.Bytes(), &response)
 			require.NoError(t, err)
 			assert.Equal(t, "healthy", response["status"])
@@ -326,7 +363,11 @@ func TestTokenHandler_SpecialCharactersInCredentials(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", specialPassword)
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", specialPassword))
 
 	rr := httptest.NewRecorder()
@@ -340,7 +381,11 @@ func TestTokenHandler_UnicodeInCredentials(t *testing.T) {
 	secret := createTestSecret("team-a", "用户", "密码")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("用户", "密码"))
 
 	rr := httptest.NewRecorder()
@@ -354,7 +399,11 @@ func TestTokenHandler_NestedImagePath(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/sub/path/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/sub/path/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 	rr := httptest.NewRecorder()
@@ -384,7 +433,11 @@ func TestTokenHandler_InvalidScopeFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope="+tt.scope, nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope="+tt.scope,
+				nil,
+			)
 			req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 			rr := httptest.NewRecorder()
@@ -400,7 +453,11 @@ func TestTokenHandler_ResponseHeaders(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 	rr := httptest.NewRecorder()
@@ -415,7 +472,11 @@ func TestTokenHandler_UnauthorizedResponseHeaders(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "wrong-password"))
 
 	rr := httptest.NewRecorder()
@@ -432,13 +493,15 @@ func TestTokenHandler_BasicAuthParsing(t *testing.T) {
 	h := setupTestHandler(t, secret)
 
 	tests := []struct {
-		name         string
-		authHeader   string
-		wantStatus   int
+		name       string
+		authHeader string
+		wantStatus int
 	}{
 		{
-			name:       "valid basic auth",
-			authHeader: "Basic " + base64.StdEncoding.EncodeToString([]byte("team-a:secret-password")),
+			name: "valid basic auth",
+			authHeader: "Basic " + base64.StdEncoding.EncodeToString(
+				[]byte("team-a:secret-password"),
+			),
 			wantStatus: http.StatusOK,
 		},
 		{
@@ -465,7 +528,11 @@ func TestTokenHandler_BasicAuthParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope=repository:team-a/myapp:pull",
+				nil,
+			)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -483,7 +550,11 @@ func TestTokenHandler_PasswordWithColon(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "pass:with:colons")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "pass:with:colons"))
 
 	rr := httptest.NewRecorder()
@@ -497,7 +568,11 @@ func TestTokenHandler_EmptyPassword(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", ""))
 
 	rr := httptest.NewRecorder()
@@ -518,40 +593,58 @@ func TestHandler_ConcurrentRequests(t *testing.T) {
 	// Run concurrent requests
 	done := make(chan bool, 30)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		// Team A requests
 		go func() {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/app:pull", nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope=repository:team-a/app:pull",
+				nil,
+			)
 			req.Header.Set("Authorization", basicAuth("team-a", "pass-a"))
+
 			rr := httptest.NewRecorder()
 			h.TokenHandler(rr, req)
 			assert.Equal(t, http.StatusOK, rr.Code)
+
 			done <- true
 		}()
 
 		// Team B requests
 		go func() {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-b/app:pull", nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope=repository:team-b/app:pull",
+				nil,
+			)
 			req.Header.Set("Authorization", basicAuth("team-b", "pass-b"))
+
 			rr := httptest.NewRecorder()
 			h.TokenHandler(rr, req)
 			assert.Equal(t, http.StatusOK, rr.Code)
+
 			done <- true
 		}()
 
 		// Team C requests
 		go func() {
-			req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-c/app:pull", nil)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/token?service=registry&scope=repository:team-c/app:pull",
+				nil,
+			)
 			req.Header.Set("Authorization", basicAuth("team-c", "pass-c"))
+
 			rr := httptest.NewRecorder()
 			h.TokenHandler(rr, req)
 			assert.Equal(t, http.StatusOK, rr.Code)
+
 			done <- true
 		}()
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		<-done
 	}
 }
@@ -568,7 +661,11 @@ func TestHandler_HTTPMethods(t *testing.T) {
 
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+			req := httptest.NewRequest(
+				method,
+				"/token?service=registry&scope=repository:team-a/myapp:pull",
+				nil,
+			)
 			req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 			rr := httptest.NewRecorder()
@@ -640,7 +737,11 @@ func TestTokenHandler_TokenResponseStructure(t *testing.T) {
 	secret := createTestSecret("team-a", "team-a", "secret-password")
 	h := setupTestHandler(t, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("team-a", "secret-password"))
 
 	rr := httptest.NewRecorder()
@@ -648,7 +749,8 @@ func TestTokenHandler_TokenResponseStructure(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 
@@ -668,7 +770,11 @@ func TestTokenHandler_TokenResponseStructure(t *testing.T) {
 func TestTokenHandler_ErrorResponseStructure(t *testing.T) {
 	h := setupTestHandler(t) // No secrets
 
-	req := httptest.NewRequest(http.MethodGet, "/token?service=registry&scope=repository:team-a/myapp:pull", nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/token?service=registry&scope=repository:team-a/myapp:pull",
+		nil,
+	)
 	req.Header.Set("Authorization", basicAuth("user", "pass"))
 
 	rr := httptest.NewRecorder()
@@ -676,7 +782,8 @@ func TestTokenHandler_ErrorResponseStructure(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 
-	var response map[string]interface{}
+	var response map[string]any
+
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 

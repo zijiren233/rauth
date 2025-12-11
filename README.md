@@ -32,7 +32,7 @@
 3. kubelet 使用 imagePullSecrets 中的凭证请求 rauth 获取 token
 4. rauth 验证：
    - 从请求中解析出目标 namespace (`namespace-a`)
-   - 从 `namespace-a` 的 `registry-credentials` Secret 读取凭证
+   - 从 `namespace-a` 的 `devbox-registry` Secret 读取凭证
    - 验证请求中的用户名密码是否匹配
    - 确保请求的镜像属于该 namespace
 5. 验证通过后，rauth 返回 JWT token
@@ -45,7 +45,7 @@
 - Kubernetes 集群
 - Helm 3.x
 - Docker Registry（部署在集群内或外部）
-- 每个 namespace 需要有一个 controller 生成 `registry-credentials` Secret
+- 每个 namespace 需要有一个 controller 生成 `devbox-registry` Secret
 
 ### 使用 Helm 部署
 
@@ -75,7 +75,7 @@ config:
   port: 8080
   issuer: "rauth"
   service: "internal-registry.io"
-  secretName: "registry-credentials"
+  secretName: "devbox-registry"
   tokenExpiry: "5m"
   logLevel: "info"
 
@@ -107,7 +107,7 @@ auth:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: registry-credentials
+  name: devbox-registry
   namespace: <namespace-name>
 type: Opaque
 data:
@@ -138,7 +138,7 @@ data:
 | `config.port` | 8080 | 服务端口 |
 | `config.issuer` | rauth | Token 签发者 |
 | `config.service` | internal-registry.io | Registry 服务名称 |
-| `config.secretName` | registry-credentials | 凭证 Secret 名称 |
+| `config.secretName` | devbox-registry | 凭证 Secret 名称 |
 | `config.tokenExpiry` | 5m | Token 有效期 |
 | `config.logLevel` | info | 日志级别 |
 | `rbac.create` | true | 是否创建 RBAC 资源 |

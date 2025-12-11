@@ -21,7 +21,7 @@ config:
   port: 8080
   issuer: "rauth"
   service: "internal-registry.io"
-  secretName: "registry-credentials"
+  secretName: "devbox-registry"
   tokenExpiry: "5m"
   logLevel: "info"
   # Path to RSA private key (optional, will auto-generate if not provided)

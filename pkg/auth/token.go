@@ -90,6 +90,7 @@ func NewTokenGenerator(option *TokenOption) (*TokenGenerator, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate RSA key: %w", err)
 		}
+
 		option.PrivateKey = privateKey
 	}
 
@@ -173,6 +174,7 @@ func generateKeyID(publicKey *rsa.PublicKey) string {
 		if i > 0 && i%4 == 0 {
 			result.WriteByte(':')
 		}
+
 		result.WriteRune(c)
 	}
 
@@ -216,6 +218,7 @@ func ExtractNamespaceFromScope(scope string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	if access == nil {
 		return "", nil
 	}
@@ -223,13 +226,19 @@ func ExtractNamespaceFromScope(scope string) (string, error) {
 	// Only handle repository type scopes
 	// Other types like "registry:catalog:*" are not supported
 	if access.Type != "repository" {
-		return "", fmt.Errorf("unsupported scope type: %s (only 'repository' is supported)", access.Type)
+		return "", fmt.Errorf(
+			"unsupported scope type: %s (only 'repository' is supported)",
+			access.Type,
+		)
 	}
 
 	// Extract namespace from resource name (format: namespace/image)
 	parts := strings.SplitN(access.Name, "/", 2)
 	if len(parts) < 2 {
-		return "", fmt.Errorf("invalid repository name format, expected namespace/image: %s", access.Name)
+		return "", fmt.Errorf(
+			"invalid repository name format, expected namespace/image: %s",
+			access.Name,
+		)
 	}
 
 	return parts[0], nil

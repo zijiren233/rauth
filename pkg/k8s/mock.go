@@ -30,6 +30,7 @@ func NewMockClient(credentials map[string]*RegistryCredentials) *MockClient {
 	if credentials == nil {
 		credentials = make(map[string]*RegistryCredentials)
 	}
+
 	return &MockClient{
 		credentials: credentials,
 	}
@@ -81,7 +82,10 @@ func NewMockClientFromEnv() *MockClient {
 }
 
 // GetNamespaceCredentials retrieves credentials for a namespace from the mock store
-func (m *MockClient) GetNamespaceCredentials(ctx context.Context, namespace string) (*RegistryCredentials, error) {
+func (m *MockClient) GetNamespaceCredentials(
+	ctx context.Context,
+	namespace string,
+) (*RegistryCredentials, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -99,6 +103,7 @@ func (m *MockClient) NamespaceExists(ctx context.Context, namespace string) (boo
 	defer m.mu.RUnlock()
 
 	_, ok := m.credentials[namespace]
+
 	return ok, nil
 }
 

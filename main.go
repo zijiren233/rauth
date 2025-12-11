@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,14 +22,14 @@ import (
 )
 
 type Config struct {
-	Port           int           `env:"RAUTH_PORT" envDefault:"8080"`
-	Issuer         string        `env:"RAUTH_ISSUER" envDefault:"rauth"`
-	Service        string        `env:"RAUTH_SERVICE" envDefault:"registry"`
-	SecretName     string        `env:"RAUTH_SECRET_NAME" envDefault:"registry-credentials"`
+	Port           int           `env:"RAUTH_PORT"         envDefault:"8080"`
+	Issuer         string        `env:"RAUTH_ISSUER"       envDefault:"rauth"`
+	Service        string        `env:"RAUTH_SERVICE"      envDefault:"registry"`
+	SecretName     string        `env:"RAUTH_SECRET_NAME"  envDefault:"devbox-registry"`
 	PrivateKeyPath string        `env:"RAUTH_PRIVATE_KEY"`
 	TokenExpiry    time.Duration `env:"RAUTH_TOKEN_EXPIRY" envDefault:"5m"`
-	LogLevel       string        `env:"RAUTH_LOG_LEVEL" envDefault:"info"`
-	MockMode       bool          `env:"RAUTH_MOCK_MODE" envDefault:"false"`
+	LogLevel       string        `env:"RAUTH_LOG_LEVEL"    envDefault:"info"`
+	MockMode       bool          `env:"RAUTH_MOCK_MODE"    envDefault:"false"`
 	MockConfigPath string        `env:"RAUTH_MOCK_CONFIG"`
 }
 
@@ -52,8 +53,10 @@ func main() {
 		"mockMode", cfg.MockMode)
 
 	// Initialize Kubernetes client (real or mock)
-	var k8sClient k8s.ClientInterface
-	var err error
+	var (
+		k8sClient k8s.ClientInterface
+		err       error
+	)
 
 	if cfg.MockMode {
 		k8sClient, err = initMockClient(cfg, logger)
@@ -86,6 +89,7 @@ func main() {
 		Expiration: cfg.TokenExpiry,
 		PrivateKey: privateKey,
 	}
+
 	generator, err := auth.NewTokenGenerator(tokenOption)
 	if err != nil {
 		logger.Error("failed to create token generator", "error", err)
@@ -119,6 +123,7 @@ func main() {
 		<-sigChan
 
 		logger.Info("shutting down server...")
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -129,6 +134,7 @@ func main() {
 
 	// Start server
 	logger.Info("server starting", "addr", server.Addr)
+
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
@@ -144,6 +150,7 @@ func initMockClient(cfg *Config, logger *slog.Logger) (k8s.ClientInterface, erro
 	}
 
 	logger.Info("loading mock credentials from environment")
+
 	return k8s.NewMockClientFromEnv(), nil
 }
 
@@ -163,6 +170,7 @@ func setupLogger(level string) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
 	})
+
 	return slog.New(handler)
 }
 
@@ -179,7 +187,7 @@ func loadOrGeneratePrivateKey(path string, logger *slog.Logger) (*rsa.PrivateKey
 
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
+		return nil, errors.New("failed to decode PEM block")
 	}
 
 	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
@@ -188,13 +196,16 @@ func loadOrGeneratePrivateKey(path string, logger *slog.Logger) (*rsa.PrivateKey
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse private key: %w", err)
 		}
+
 		var ok bool
+
 		privateKey, ok = key.(*rsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("private key is not RSA")
+			return nil, errors.New("private key is not RSA")
 		}
 	}
 
 	logger.Info("loaded private key from file", "path", path)
+
 	return privateKey, nil
 }
