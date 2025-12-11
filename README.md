@@ -11,7 +11,7 @@
 
 ## 架构
 
-```
+```text
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │   Client    │───>│  Registry   │───>│   rauth     │
 │ (kubelet)   │    │             │    │             │
@@ -101,7 +101,18 @@ auth:
 
 ### 配置 Namespace Secret
 
-每个 namespace 需要有 controller 生成如下格式的 Secret：
+每个 namespace 只需要一个 `kubernetes.io/dockerconfigjson` 类型的 Secret，rauth 会自动解析其中的凭据：
+
+```bash
+# 使用 kubectl 创建（推荐）
+kubectl create secret docker-registry devbox-registry \
+  --namespace=<namespace-name> \
+  --docker-server=internal-registry.io \
+  --docker-username=<namespace-name> \
+  --docker-password=<random-password>
+```
+
+或者手动创建 YAML：
 
 ```yaml
 apiVersion: v1
@@ -109,24 +120,26 @@ kind: Secret
 metadata:
   name: devbox-registry
   namespace: <namespace-name>
-type: Opaque
-data:
-  username: <base64-encoded-username>  # 建议使用 namespace 名称
-  password: <base64-encoded-password>  # 随机生成的密码
-```
-
-同时生成对应的 imagePullSecret：
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: registry-pull-secret
-  namespace: <namespace-name>
 type: kubernetes.io/dockerconfigjson
 data:
   .dockerconfigjson: <base64-encoded-docker-config>
 ```
+
+**注意**：`username` 必须与 namespace 名称相同，这是 rauth 的安全隔离机制。
+
+同一个 Secret 可以同时用于：
+
+1. rauth 鉴权（读取 username/password）
+2. Pod 的 imagePullSecrets（拉取镜像）
+
+```yaml
+# Pod 配置示例
+spec:
+  imagePullSecrets:
+    - name: devbox-registry
+```
+
+> 兼容性：rauth 同时支持旧的 Opaque 类型 Secret（包含 username/password 字段）
 
 ## Helm Chart 参数
 

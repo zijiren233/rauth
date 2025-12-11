@@ -2,9 +2,12 @@ package k8s
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -105,8 +108,80 @@ func (c *Client) GetNamespaceCredentials(
 	return ExtractCredentials(secret)
 }
 
+// DockerConfigJSON represents the structure of .dockerconfigjson
+type DockerConfigJSON struct {
+	Auths map[string]DockerConfigEntry `json:"auths"`
+}
+
+// DockerConfigEntry represents a single registry entry in dockerconfigjson
+type DockerConfigEntry struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Auth     string `json:"auth"` // base64(username:password)
+}
+
 // ExtractCredentials extracts username and password from secret
+// Supports both kubernetes.io/dockerconfigjson and Opaque secret types
 func ExtractCredentials(secret *corev1.Secret) (*RegistryCredentials, error) {
+	// Try kubernetes.io/dockerconfigjson format first
+	if secret.Type == corev1.SecretTypeDockerConfigJson {
+		return extractFromDockerConfigJSON(secret)
+	}
+
+	// Fall back to Opaque secret with username/password keys
+	return extractFromOpaqueSecret(secret)
+}
+
+// extractFromDockerConfigJSON extracts credentials from kubernetes.io/dockerconfigjson secret
+func extractFromDockerConfigJSON(secret *corev1.Secret) (*RegistryCredentials, error) {
+	data, ok := secret.Data[corev1.DockerConfigJsonKey]
+	if !ok {
+		return nil, errors.New("secret does not contain '.dockerconfigjson' key")
+	}
+
+	var config DockerConfigJSON
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse .dockerconfigjson: %w", err)
+	}
+
+	if len(config.Auths) == 0 {
+		return nil, errors.New(".dockerconfigjson contains no auth entries")
+	}
+
+	// Get the first (and typically only) auth entry
+	for _, entry := range config.Auths {
+		// Try username/password fields first
+		if entry.Username != "" && entry.Password != "" {
+			return &RegistryCredentials{
+				Username: entry.Username,
+				Password: entry.Password,
+			}, nil
+		}
+
+		// Fall back to decoding auth field (base64 of "username:password")
+		if entry.Auth != "" {
+			decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode auth field: %w", err)
+			}
+
+			parts := strings.SplitN(string(decoded), ":", 2)
+			if len(parts) != 2 {
+				return nil, errors.New("invalid auth field format, expected 'username:password'")
+			}
+
+			return &RegistryCredentials{
+				Username: parts[0],
+				Password: parts[1],
+			}, nil
+		}
+	}
+
+	return nil, errors.New("no valid credentials found in .dockerconfigjson")
+}
+
+// extractFromOpaqueSecret extracts credentials from Opaque secret with username/password keys
+func extractFromOpaqueSecret(secret *corev1.Secret) (*RegistryCredentials, error) {
 	username, ok := secret.Data["username"]
 	if !ok {
 		return nil, errors.New("secret does not contain 'username' key")

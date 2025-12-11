@@ -2,6 +2,8 @@ package k8s_test
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// createTestSecret creates a test secret for testing
+// createTestSecret creates a test secret for testing (Opaque type)
 func createTestSecret(namespace, secretName, username, password string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -22,6 +24,45 @@ func createTestSecret(namespace, secretName, username, password string) *corev1.
 		Data: map[string][]byte{
 			"username": []byte(username),
 			"password": []byte(password),
+		},
+	}
+}
+
+// createDockerConfigJSONSecret creates a kubernetes.io/dockerconfigjson type secret
+func createDockerConfigJSONSecret(
+	namespace, secretName, registry, username, password string,
+) *corev1.Secret {
+	authStr := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	dockerConfig := fmt.Sprintf(`{"auths":{"%s":{"username":"%s","password":"%s","auth":"%s"}}}`,
+		registry, username, password, authStr)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		},
+		Type: corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{
+			corev1.DockerConfigJsonKey: []byte(dockerConfig),
+		},
+	}
+}
+
+// createDockerConfigJSONSecretAuthOnly creates a secret with only auth field (no username/password)
+func createDockerConfigJSONSecretAuthOnly(
+	namespace, secretName, registry, username, password string,
+) *corev1.Secret {
+	authStr := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	dockerConfig := fmt.Sprintf(`{"auths":{"%s":{"auth":"%s"}}}`, registry, authStr)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		},
+		Type: corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{
+			corev1.DockerConfigJsonKey: []byte(dockerConfig),
 		},
 	}
 }
@@ -200,6 +241,77 @@ func TestExtractCredentials(t *testing.T) {
 			wantErr:     true,
 			errContains: "username",
 		},
+		// dockerconfigjson format tests
+		{
+			name: "dockerconfigjson with username and password",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(
+						`{"auths":{"registry.example.com":{"username":"docker-user","password":"docker-pass","auth":"ZG9ja2VyLXVzZXI6ZG9ja2VyLXBhc3M="}}}`,
+					),
+				},
+			},
+			wantUser: "docker-user",
+			wantPass: "docker-pass",
+		},
+		{
+			name: "dockerconfigjson with auth only",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(
+						`{"auths":{"registry.example.com":{"auth":"YXV0aC11c2VyOmF1dGgtcGFzcw=="}}}`,
+					),
+				},
+			},
+			wantUser: "auth-user",
+			wantPass: "auth-pass",
+		},
+		{
+			name: "dockerconfigjson with special characters in password",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(
+						`{"auths":{"registry.example.com":{"username":"user","password":"p@ss:word!","auth":"dXNlcjpwQHNzOndvcmQh"}}}`,
+					),
+				},
+			},
+			wantUser: "user",
+			wantPass: "p@ss:word!",
+		},
+		{
+			name: "dockerconfigjson missing .dockerconfigjson key",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{},
+			},
+			wantErr:     true,
+			errContains: ".dockerconfigjson",
+		},
+		{
+			name: "dockerconfigjson empty auths",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(`{"auths":{}}`),
+				},
+			},
+			wantErr:     true,
+			errContains: "no auth entries",
+		},
+		{
+			name: "dockerconfigjson invalid json",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(`{invalid`),
+				},
+			},
+			wantErr:     true,
+			errContains: "failed to parse",
+		},
 	}
 
 	for _, tt := range tests {
@@ -226,6 +338,46 @@ func TestExtractCredentials(t *testing.T) {
 // TestDefaultSecretName tests that the default secret name constant is correct
 func TestDefaultSecretName(t *testing.T) {
 	assert.Equal(t, "devbox-registry", k8s.DefaultSecretName)
+}
+
+// TestGetNamespaceCredentials_DockerConfigJSON tests using dockerconfigjson secrets
+func TestGetNamespaceCredentials_DockerConfigJSON(t *testing.T) {
+	secret := createDockerConfigJSONSecret(
+		"test-ns",
+		k8s.DefaultSecretName,
+		"registry.io",
+		"docker-user",
+		"docker-pass",
+	)
+	fakeClientset := fake.NewSimpleClientset(secret)
+	client := k8s.NewClientWithInterface(fakeClientset, "")
+
+	ctx := context.Background()
+	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
+
+	require.NoError(t, err)
+	assert.Equal(t, "docker-user", creds.Username)
+	assert.Equal(t, "docker-pass", creds.Password)
+}
+
+// TestGetNamespaceCredentials_DockerConfigJSON_AuthOnly tests dockerconfigjson with auth field only
+func TestGetNamespaceCredentials_DockerConfigJSON_AuthOnly(t *testing.T) {
+	secret := createDockerConfigJSONSecretAuthOnly(
+		"test-ns",
+		k8s.DefaultSecretName,
+		"registry.io",
+		"auth-user",
+		"auth-pass",
+	)
+	fakeClientset := fake.NewSimpleClientset(secret)
+	client := k8s.NewClientWithInterface(fakeClientset, "")
+
+	ctx := context.Background()
+	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
+
+	require.NoError(t, err)
+	assert.Equal(t, "auth-user", creds.Username)
+	assert.Equal(t, "auth-pass", creds.Password)
 }
 
 // TestClientInterface_Compliance tests that Client implements ClientInterface
