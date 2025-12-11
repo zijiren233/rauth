@@ -31,7 +31,7 @@ func setupTestAuthenticator(t *testing.T, secrets ...*corev1.Secret) *auth.Authe
 		}
 	}
 
-	k8sClient := k8s.NewClientWithInterface(fakeClientset, "")
+	k8sClient := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)

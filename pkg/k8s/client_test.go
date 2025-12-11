@@ -70,7 +70,7 @@ func createDockerConfigJSONSecretAuthOnly(
 // TestNewClientWithInterface tests creating a client with a fake kubernetes interface
 func TestNewClientWithInterface(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	assert.NotNil(t, client)
 	assert.Equal(t, k8s.DefaultSecretName, client.GetSecretName())
@@ -79,7 +79,7 @@ func TestNewClientWithInterface(t *testing.T) {
 // TestNewClientWithInterface_CustomSecretName tests custom secret name
 func TestNewClientWithInterface_CustomSecretName(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
-	client := k8s.NewClientWithInterface(fakeClientset, "custom-secret")
+	client := k8s.NewClientWithInterface(fakeClientset, "custom-secret", "registry.io")
 
 	assert.Equal(t, "custom-secret", client.GetSecretName())
 }
@@ -88,7 +88,7 @@ func TestNewClientWithInterface_CustomSecretName(t *testing.T) {
 func TestGetNamespaceCredentials_Success(t *testing.T) {
 	secret := createTestSecret("test-ns", k8s.DefaultSecretName, "test-user", "test-pass")
 	fakeClientset := fake.NewSimpleClientset(secret)
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
@@ -101,7 +101,7 @@ func TestGetNamespaceCredentials_Success(t *testing.T) {
 // TestGetNamespaceCredentials_SecretNotFound tests when secret doesn't exist
 func TestGetNamespaceCredentials_SecretNotFound(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 	_, err := client.GetNamespaceCredentials(ctx, "non-existent")
@@ -116,7 +116,7 @@ func TestGetNamespaceCredentials_MultipleNamespaces(t *testing.T) {
 	secret2 := createTestSecret("ns-b", k8s.DefaultSecretName, "user-b", "pass-b")
 
 	fakeClientset := fake.NewSimpleClientset(secret1, secret2)
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 
@@ -141,7 +141,7 @@ func TestGetNamespaceCredentials_MultipleNamespaces(t *testing.T) {
 func TestGetNamespaceCredentials_CustomSecretName(t *testing.T) {
 	secret := createTestSecret("test-ns", "my-custom-secret", "user", "pass")
 	fakeClientset := fake.NewSimpleClientset(secret)
-	client := k8s.NewClientWithInterface(fakeClientset, "my-custom-secret")
+	client := k8s.NewClientWithInterface(fakeClientset, "my-custom-secret", "registry.io")
 
 	ctx := context.Background()
 	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
@@ -157,7 +157,7 @@ func TestNamespaceExists(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"},
 	}
 	fakeClientset := fake.NewSimpleClientset(ns)
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 
@@ -173,12 +173,13 @@ func TestNamespaceExists(t *testing.T) {
 // TestExtractCredentials tests the ExtractCredentials function
 func TestExtractCredentials(t *testing.T) {
 	tests := []struct {
-		name        string
-		secret      *corev1.Secret
-		wantUser    string
-		wantPass    string
-		wantErr     bool
-		errContains string
+		name         string
+		secret       *corev1.Secret
+		registryHost string
+		wantUser     string
+		wantPass     string
+		wantErr      bool
+		errContains  string
 	}{
 		{
 			name: "valid secret",
@@ -188,8 +189,9 @@ func TestExtractCredentials(t *testing.T) {
 					"password": []byte("mypass"),
 				},
 			},
-			wantUser: "myuser",
-			wantPass: "mypass",
+			registryHost: "registry.example.com",
+			wantUser:     "myuser",
+			wantPass:     "mypass",
 		},
 		{
 			name: "special characters",
@@ -199,8 +201,9 @@ func TestExtractCredentials(t *testing.T) {
 					"password": []byte("p@ss!w0rd#$%"),
 				},
 			},
-			wantUser: "user@domain.com",
-			wantPass: "p@ss!w0rd#$%",
+			registryHost: "registry.example.com",
+			wantUser:     "user@domain.com",
+			wantPass:     "p@ss!w0rd#$%",
 		},
 		{
 			name: "unicode characters",
@@ -210,8 +213,9 @@ func TestExtractCredentials(t *testing.T) {
 					"password": []byte("密码"),
 				},
 			},
-			wantUser: "用户",
-			wantPass: "密码",
+			registryHost: "registry.example.com",
+			wantUser:     "用户",
+			wantPass:     "密码",
 		},
 		{
 			name: "missing username",
@@ -220,8 +224,9 @@ func TestExtractCredentials(t *testing.T) {
 					"password": []byte("pass"),
 				},
 			},
-			wantErr:     true,
-			errContains: "username",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "username",
 		},
 		{
 			name: "missing password",
@@ -230,16 +235,18 @@ func TestExtractCredentials(t *testing.T) {
 					"username": []byte("user"),
 				},
 			},
-			wantErr:     true,
-			errContains: "password",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "password",
 		},
 		{
 			name: "nil data",
 			secret: &corev1.Secret{
 				Data: nil,
 			},
-			wantErr:     true,
-			errContains: "username",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "username",
 		},
 		// dockerconfigjson format tests
 		{
@@ -252,8 +259,9 @@ func TestExtractCredentials(t *testing.T) {
 					),
 				},
 			},
-			wantUser: "docker-user",
-			wantPass: "docker-pass",
+			registryHost: "registry.example.com",
+			wantUser:     "docker-user",
+			wantPass:     "docker-pass",
 		},
 		{
 			name: "dockerconfigjson with auth only",
@@ -265,8 +273,9 @@ func TestExtractCredentials(t *testing.T) {
 					),
 				},
 			},
-			wantUser: "auth-user",
-			wantPass: "auth-pass",
+			registryHost: "registry.example.com",
+			wantUser:     "auth-user",
+			wantPass:     "auth-pass",
 		},
 		{
 			name: "dockerconfigjson with special characters in password",
@@ -278,8 +287,9 @@ func TestExtractCredentials(t *testing.T) {
 					),
 				},
 			},
-			wantUser: "user",
-			wantPass: "p@ss:word!",
+			registryHost: "registry.example.com",
+			wantUser:     "user",
+			wantPass:     "p@ss:word!",
 		},
 		{
 			name: "dockerconfigjson missing .dockerconfigjson key",
@@ -287,8 +297,9 @@ func TestExtractCredentials(t *testing.T) {
 				Type: corev1.SecretTypeDockerConfigJson,
 				Data: map[string][]byte{},
 			},
-			wantErr:     true,
-			errContains: ".dockerconfigjson",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  ".dockerconfigjson",
 		},
 		{
 			name: "dockerconfigjson empty auths",
@@ -298,8 +309,9 @@ func TestExtractCredentials(t *testing.T) {
 					corev1.DockerConfigJsonKey: []byte(`{"auths":{}}`),
 				},
 			},
-			wantErr:     true,
-			errContains: "no auth entries",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "no auth entries",
 		},
 		{
 			name: "dockerconfigjson invalid json",
@@ -309,14 +321,29 @@ func TestExtractCredentials(t *testing.T) {
 					corev1.DockerConfigJsonKey: []byte(`{invalid`),
 				},
 			},
-			wantErr:     true,
-			errContains: "failed to parse",
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "failed to parse",
+		},
+		{
+			name: "dockerconfigjson registry host not found",
+			secret: &corev1.Secret{
+				Type: corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(
+						`{"auths":{"other-registry.io":{"username":"user","password":"pass"}}}`,
+					),
+				},
+			},
+			registryHost: "registry.example.com",
+			wantErr:      true,
+			errContains:  "not found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			creds, err := k8s.ExtractCredentials(tt.secret)
+			creds, err := k8s.ExtractCredentials(tt.secret, tt.registryHost)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -350,7 +377,7 @@ func TestGetNamespaceCredentials_DockerConfigJSON(t *testing.T) {
 		"docker-pass",
 	)
 	fakeClientset := fake.NewSimpleClientset(secret)
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
@@ -370,7 +397,7 @@ func TestGetNamespaceCredentials_DockerConfigJSON_AuthOnly(t *testing.T) {
 		"auth-pass",
 	)
 	fakeClientset := fake.NewSimpleClientset(secret)
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	ctx := context.Background()
 	creds, err := client.GetNamespaceCredentials(ctx, "test-ns")
@@ -383,7 +410,7 @@ func TestGetNamespaceCredentials_DockerConfigJSON_AuthOnly(t *testing.T) {
 // TestClientInterface_Compliance tests that Client implements ClientInterface
 func TestClientInterface_Compliance(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
-	client := k8s.NewClientWithInterface(fakeClientset, "")
+	client := k8s.NewClientWithInterface(fakeClientset, "", "registry.io")
 
 	// This will fail at compile time if Client doesn't implement ClientInterface
 	var _ k8s.ClientInterface = client

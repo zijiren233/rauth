@@ -35,12 +35,13 @@ type RegistryCredentials struct {
 
 // Client wraps kubernetes clientset
 type Client struct {
-	clientset  kubernetes.Interface
-	secretName string
+	clientset    kubernetes.Interface
+	secretName   string
+	registryHost string // registry host for dockerconfigjson lookup
 }
 
 // NewClient creates a new kubernetes client
-func NewClient(secretName string) (*Client, error) {
+func NewClient(secretName, registryHost string) (*Client, error) {
 	var (
 		config *rest.Config
 		err    error
@@ -71,20 +72,25 @@ func NewClient(secretName string) (*Client, error) {
 	}
 
 	return &Client{
-		clientset:  clientset,
-		secretName: secretName,
+		clientset:    clientset,
+		secretName:   secretName,
+		registryHost: registryHost,
 	}, nil
 }
 
 // NewClientWithInterface creates a client with a provided kubernetes interface (for testing)
-func NewClientWithInterface(clientset kubernetes.Interface, secretName string) *Client {
+func NewClientWithInterface(
+	clientset kubernetes.Interface,
+	secretName, registryHost string,
+) *Client {
 	if secretName == "" {
 		secretName = DefaultSecretName
 	}
 
 	return &Client{
-		clientset:  clientset,
-		secretName: secretName,
+		clientset:    clientset,
+		secretName:   secretName,
+		registryHost: registryHost,
 	}
 }
 
@@ -105,7 +111,12 @@ func (c *Client) GetNamespaceCredentials(
 		)
 	}
 
-	return ExtractCredentials(secret)
+	return ExtractCredentials(secret, c.registryHost)
+}
+
+// GetRegistryHost returns the configured registry host
+func (c *Client) GetRegistryHost() string {
+	return c.registryHost
 }
 
 // DockerConfigJSON represents the structure of .dockerconfigjson
@@ -122,10 +133,11 @@ type DockerConfigEntry struct {
 
 // ExtractCredentials extracts username and password from secret
 // Supports both kubernetes.io/dockerconfigjson and Opaque secret types
-func ExtractCredentials(secret *corev1.Secret) (*RegistryCredentials, error) {
+// For dockerconfigjson, registryHost specifies which registry entry to use
+func ExtractCredentials(secret *corev1.Secret, registryHost string) (*RegistryCredentials, error) {
 	// Try kubernetes.io/dockerconfigjson format first
 	if secret.Type == corev1.SecretTypeDockerConfigJson {
-		return extractFromDockerConfigJSON(secret)
+		return extractFromDockerConfigJSON(secret, registryHost)
 	}
 
 	// Fall back to Opaque secret with username/password keys
@@ -133,7 +145,11 @@ func ExtractCredentials(secret *corev1.Secret) (*RegistryCredentials, error) {
 }
 
 // extractFromDockerConfigJSON extracts credentials from kubernetes.io/dockerconfigjson secret
-func extractFromDockerConfigJSON(secret *corev1.Secret) (*RegistryCredentials, error) {
+// registryHost specifies which registry entry to look up (e.g., "internal-registry.io")
+func extractFromDockerConfigJSON(
+	secret *corev1.Secret,
+	registryHost string,
+) (*RegistryCredentials, error) {
 	data, ok := secret.Data[corev1.DockerConfigJsonKey]
 	if !ok {
 		return nil, errors.New("secret does not contain '.dockerconfigjson' key")
@@ -148,36 +164,39 @@ func extractFromDockerConfigJSON(secret *corev1.Secret) (*RegistryCredentials, e
 		return nil, errors.New(".dockerconfigjson contains no auth entries")
 	}
 
-	// Get the first (and typically only) auth entry
-	for _, entry := range config.Auths {
-		// Try username/password fields first
-		if entry.Username != "" && entry.Password != "" {
-			return &RegistryCredentials{
-				Username: entry.Username,
-				Password: entry.Password,
-			}, nil
-		}
-
-		// Fall back to decoding auth field (base64 of "username:password")
-		if entry.Auth != "" {
-			decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode auth field: %w", err)
-			}
-
-			parts := strings.SplitN(string(decoded), ":", 2)
-			if len(parts) != 2 {
-				return nil, errors.New("invalid auth field format, expected 'username:password'")
-			}
-
-			return &RegistryCredentials{
-				Username: parts[0],
-				Password: parts[1],
-			}, nil
-		}
+	// Look up the specific registry host entry
+	entry, ok := config.Auths[registryHost]
+	if !ok {
+		return nil, fmt.Errorf("registry host %q not found in .dockerconfigjson", registryHost)
 	}
 
-	return nil, errors.New("no valid credentials found in .dockerconfigjson")
+	// Try username/password fields first
+	if entry.Username != "" && entry.Password != "" {
+		return &RegistryCredentials{
+			Username: entry.Username,
+			Password: entry.Password,
+		}, nil
+	}
+
+	// Fall back to decoding auth field (base64 of "username:password")
+	if entry.Auth != "" {
+		decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode auth field: %w", err)
+		}
+
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) != 2 {
+			return nil, errors.New("invalid auth field format, expected 'username:password'")
+		}
+
+		return &RegistryCredentials{
+			Username: parts[0],
+			Password: parts[1],
+		}, nil
+	}
+
+	return nil, fmt.Errorf("no valid credentials found for registry host %q", registryHost)
 }
 
 // extractFromOpaqueSecret extracts credentials from Opaque secret with username/password keys

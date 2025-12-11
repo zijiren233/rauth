@@ -61,7 +61,7 @@ func main() {
 	if cfg.MockMode {
 		k8sClient, err = initMockClient(cfg, logger)
 	} else {
-		k8sClient, err = k8s.NewClient(cfg.SecretName)
+		k8sClient, err = k8s.NewClient(cfg.SecretName, cfg.Service)
 	}
 
 	if err != nil {

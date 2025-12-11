@@ -64,7 +64,7 @@ func (c *mockK8sClient) GetNamespaceCredentials(
 		return nil, err
 	}
 
-	return k8s.ExtractCredentials(secret)
+	return k8s.ExtractCredentials(secret, "registry.io")
 }
 
 func (c *mockK8sClient) NamespaceExists(ctx context.Context, namespace string) (bool, error) {
