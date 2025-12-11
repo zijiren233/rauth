@@ -3,15 +3,13 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/distribution/distribution/v3/registry/auth/token"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -23,24 +21,17 @@ type TokenOption struct {
 	PrivateKey *rsa.PrivateKey
 }
 
-// Access represents a single access entry in the token
-type Access struct {
-	Type    string   `json:"type"`
-	Name    string   `json:"name"`
-	Actions []string `json:"actions"`
-}
-
 // Claims represents the JWT claims for Docker Registry token
 // Note: Docker Registry expects 'aud' to be a string, not an array
 type Claims struct {
-	Issuer    string           `json:"iss,omitempty"`
-	Subject   string           `json:"sub,omitempty"`
-	Audience  string           `json:"aud,omitempty"`
-	ExpiresAt *jwt.NumericDate `json:"exp,omitempty"`
-	NotBefore *jwt.NumericDate `json:"nbf,omitempty"`
-	IssuedAt  *jwt.NumericDate `json:"iat,omitempty"`
-	JWTID     string           `json:"jti,omitempty"`
-	Access    []Access         `json:"access,omitempty"`
+	Issuer    string                   `json:"iss,omitempty"`
+	Subject   string                   `json:"sub,omitempty"`
+	Audience  string                   `json:"aud,omitempty"`
+	ExpiresAt *jwt.NumericDate         `json:"exp,omitempty"`
+	NotBefore *jwt.NumericDate         `json:"nbf,omitempty"`
+	IssuedAt  *jwt.NumericDate         `json:"iat,omitempty"`
+	JWTID     string                   `json:"jti,omitempty"`
+	Access    []*token.ResourceActions `json:"access,omitempty"`
 }
 
 // GetExpirationTime implements jwt.Claims interface
@@ -108,7 +99,10 @@ func NewTokenGenerator(option *TokenOption) (*TokenGenerator, error) {
 }
 
 // GenerateToken generates a JWT token for the given access
-func (g *TokenGenerator) GenerateToken(subject string, access []Access) (string, error) {
+func (g *TokenGenerator) GenerateToken(
+	subject string,
+	access []*token.ResourceActions,
+) (string, error) {
 	now := time.Now()
 
 	claims := Claims{
@@ -143,42 +137,10 @@ func (g *TokenGenerator) GetKeyID() string {
 	return g.keyID
 }
 
-// generateKeyID generates a key ID from the public key using the libtrust algorithm
-// This matches the algorithm used by Docker Registry's libtrust library:
-// 1. DER encode the public key using PKIX format
-// 2. SHA256 hash
-// 3. Take first 30 bytes (240 bits)
-// 4. Base32 encode (uppercase, no padding)
-// 5. Insert colons every 4 characters
+// generateKeyID generates a key ID from the public key using JWK Thumbprint (RFC 7638)
+// Uses the upstream distribution library to ensure compatibility with Docker Registry v3
 func generateKeyID(publicKey *rsa.PublicKey) string {
-	// DER encode the public key using PKIX format
-	derBytes, err := x509.MarshalPKIXPublicKey(publicKey)
-	if err != nil {
-		// Fallback to a simple hash if marshaling fails
-		return ""
-	}
-
-	// SHA256 hash
-	hash := sha256.Sum256(derBytes)
-
-	// Take first 30 bytes (240 bits)
-	truncated := hash[:30]
-
-	// Base32 encode (uppercase, no padding)
-	encoded := base32.StdEncoding.EncodeToString(truncated)
-	encoded = strings.TrimRight(encoded, "=")
-
-	// Insert colons every 4 characters
-	var result strings.Builder
-	for i, c := range encoded {
-		if i > 0 && i%4 == 0 {
-			result.WriteByte(':')
-		}
-
-		result.WriteRune(c)
-	}
-
-	return result.String()
+	return token.GetRFC7638Thumbprint(publicKey)
 }
 
 // generateJTI generates a unique token ID
@@ -190,7 +152,7 @@ func generateJTI() string {
 
 // ParseScope parses the scope string from registry request
 // Format: repository:namespace/image:action1,action2
-func ParseScope(scope string) (*Access, error) {
+func ParseScope(scope string) (*token.ResourceActions, error) {
 	if scope == "" {
 		return nil, nil
 	}
@@ -204,7 +166,7 @@ func ParseScope(scope string) (*Access, error) {
 	resourceName := parts[1]
 	actions := strings.Split(parts[2], ",")
 
-	return &Access{
+	return &token.ResourceActions{
 		Type:    resourceType,
 		Name:    resourceName,
 		Actions: actions,

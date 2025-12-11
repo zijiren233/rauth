@@ -282,14 +282,15 @@ func TestIntegration_FullAuthenticationFlow(t *testing.T) {
 }
 
 // TestIntegration_MultiTenantIsolation tests that namespaces are properly isolated
+// Note: username must equal namespace for authentication to work
 func TestIntegration_MultiTenantIsolation(t *testing.T) {
 	suite := SetupIntegrationTest(t)
 	defer suite.Cleanup()
 
-	// Create multiple namespace secrets
-	suite.CreateNamespaceSecret(t, "team-alpha", "alpha-user", "alpha-pass")
-	suite.CreateNamespaceSecret(t, "team-beta", "beta-user", "beta-pass")
-	suite.CreateNamespaceSecret(t, "team-gamma", "gamma-user", "gamma-pass")
+	// Create multiple namespace secrets (username == namespace)
+	suite.CreateNamespaceSecret(t, "team-alpha", "team-alpha", "alpha-pass")
+	suite.CreateNamespaceSecret(t, "team-beta", "team-beta", "beta-pass")
+	suite.CreateNamespaceSecret(t, "team-gamma", "team-gamma", "gamma-pass")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -303,21 +304,21 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 		// Valid access - same namespace
 		{
 			name:           "alpha accessing alpha",
-			username:       "alpha-user",
+			username:       "team-alpha",
 			password:       "alpha-pass",
 			targetNS:       "team-alpha",
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "beta accessing beta",
-			username:       "beta-user",
+			username:       "team-beta",
 			password:       "beta-pass",
 			targetNS:       "team-beta",
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "gamma accessing gamma",
-			username:       "gamma-user",
+			username:       "team-gamma",
 			password:       "gamma-pass",
 			targetNS:       "team-gamma",
 			expectedStatus: http.StatusOK,
@@ -325,21 +326,21 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 		// Invalid access - cross namespace
 		{
 			name:           "alpha trying to access beta",
-			username:       "alpha-user",
+			username:       "team-alpha",
 			password:       "alpha-pass",
 			targetNS:       "team-beta",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			name:           "beta trying to access gamma",
-			username:       "beta-user",
+			username:       "team-beta",
 			password:       "beta-pass",
 			targetNS:       "team-gamma",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			name:           "gamma trying to access alpha",
-			username:       "gamma-user",
+			username:       "team-gamma",
 			password:       "gamma-pass",
 			targetNS:       "team-alpha",
 			expectedStatus: http.StatusUnauthorized,
@@ -347,7 +348,7 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 		// Wrong credentials
 		{
 			name:           "wrong password for alpha",
-			username:       "alpha-user",
+			username:       "team-alpha",
 			password:       "wrong-pass",
 			targetNS:       "team-alpha",
 			expectedStatus: http.StatusUnauthorized,
@@ -379,11 +380,12 @@ func TestIntegration_MultiTenantIsolation(t *testing.T) {
 }
 
 // TestIntegration_TokenExpiration tests that tokens have correct expiration
+// Note: username must equal namespace for authentication to work
 func TestIntegration_TokenExpiration(t *testing.T) {
 	suite := SetupIntegrationTest(t)
 	defer suite.Cleanup()
 
-	suite.CreateNamespaceSecret(t, "test-ns", "test-user", "test-pass")
+	suite.CreateNamespaceSecret(t, "test-ns", "test-ns", "test-pass")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -393,7 +395,7 @@ func TestIntegration_TokenExpiration(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", basicAuth("test-user", "test-pass"))
+	req.Header.Set("Authorization", basicAuth("test-ns", "test-pass"))
 
 	beforeRequest := time.Now()
 	resp, err := client.Do(req)
@@ -459,11 +461,12 @@ func TestIntegration_HealthEndpoints(t *testing.T) {
 }
 
 // TestIntegration_PullAndPushActions tests different action permissions
+// Note: username must equal namespace for authentication to work
 func TestIntegration_PullAndPushActions(t *testing.T) {
 	suite := SetupIntegrationTest(t)
 	defer suite.Cleanup()
 
-	suite.CreateNamespaceSecret(t, "dev", "dev-user", "dev-pass")
+	suite.CreateNamespaceSecret(t, "dev", "dev", "dev-pass")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -506,7 +509,7 @@ func TestIntegration_PullAndPushActions(t *testing.T) {
 				nil,
 			)
 			require.NoError(t, err)
-			req.Header.Set("Authorization", basicAuth("dev-user", "dev-pass"))
+			req.Header.Set("Authorization", basicAuth("dev", "dev-pass"))
 
 			resp, err := client.Do(req)
 			require.NoError(t, err)
@@ -658,11 +661,11 @@ func TestIntegration_ConcurrentMultiTenant(t *testing.T) {
 	suite := SetupIntegrationTest(t)
 	defer suite.Cleanup()
 
-	// Create many namespace secrets
+	// Create many namespace secrets (username == namespace)
 	numTenants := 10
 	for i := range numTenants {
 		ns := fmt.Sprintf("tenant-%d", i)
-		suite.CreateNamespaceSecret(t, ns, ns+"-user", ns+"-pass")
+		suite.CreateNamespaceSecret(t, ns, ns, ns+"-pass")
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -689,7 +692,7 @@ func TestIntegration_ConcurrentMultiTenant(t *testing.T) {
 					return
 				}
 
-				req.Header.Set("Authorization", basicAuth(ns+"-user", ns+"-pass"))
+				req.Header.Set("Authorization", basicAuth(ns, ns+"-pass"))
 
 				resp, err := client.Do(req)
 				if err != nil {

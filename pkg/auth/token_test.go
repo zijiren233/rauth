@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/distribution/distribution/v3/registry/auth/token"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,26 +87,26 @@ func TestGenerateToken(t *testing.T) {
 	tests := []struct {
 		name    string
 		subject string
-		access  []auth.Access
+		access  []*token.ResourceActions
 	}{
 		{
 			name:    "simple pull access",
 			subject: "test-user",
-			access: []auth.Access{
+			access: []*token.ResourceActions{
 				{Type: "repository", Name: "namespace/image", Actions: []string{"pull"}},
 			},
 		},
 		{
 			name:    "pull and push access",
 			subject: "test-user",
-			access: []auth.Access{
+			access: []*token.ResourceActions{
 				{Type: "repository", Name: "namespace/image", Actions: []string{"pull", "push"}},
 			},
 		},
 		{
 			name:    "empty access",
 			subject: "test-user",
-			access:  []auth.Access{},
+			access:  []*token.ResourceActions{},
 		},
 		{
 			name:    "nil access",
@@ -337,7 +338,7 @@ func TestTokenSignatureVerification(t *testing.T) {
 
 // TestAccessStructSerialization tests Access struct JSON serialization
 func TestAccessStructSerialization(t *testing.T) {
-	access := auth.Access{
+	access := token.ResourceActions{
 		Type:    "repository",
 		Name:    "namespace/image",
 		Actions: []string{"pull", "push"},
@@ -346,7 +347,7 @@ func TestAccessStructSerialization(t *testing.T) {
 	jsonBytes, err := json.Marshal(access)
 	require.NoError(t, err)
 
-	var parsed auth.Access
+	var parsed token.ResourceActions
 
 	err = json.Unmarshal(jsonBytes, &parsed)
 	require.NoError(t, err)

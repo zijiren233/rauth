@@ -377,8 +377,9 @@ func TestTokenHandler_SpecialCharactersInCredentials(t *testing.T) {
 }
 
 // TestTokenHandler_UnicodeInCredentials tests credentials with unicode characters
+// Note: username must equal namespace for authentication to work
 func TestTokenHandler_UnicodeInCredentials(t *testing.T) {
-	secret := createTestSecret("team-a", "用户", "密码")
+	secret := createTestSecret("team-a", "team-a", "密码测试")
 	h := setupTestHandler(t, secret)
 
 	req := httptest.NewRequest(
@@ -386,7 +387,7 @@ func TestTokenHandler_UnicodeInCredentials(t *testing.T) {
 		"/token?service=registry&scope=repository:team-a/myapp:pull",
 		nil,
 	)
-	req.Header.Set("Authorization", basicAuth("用户", "密码"))
+	req.Header.Set("Authorization", basicAuth("team-a", "密码测试"))
 
 	rr := httptest.NewRecorder()
 	h.TokenHandler(rr, req)

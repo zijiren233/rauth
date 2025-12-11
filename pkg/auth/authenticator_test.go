@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/distribution/distribution/v3/registry/auth/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zijiren233/rauth/pkg/auth"
@@ -315,7 +316,7 @@ func TestAuthResult_Fields(t *testing.T) {
 	result := &auth.AuthResult{
 		Authenticated: true,
 		Subject:       "user",
-		Access: []auth.Access{
+		Access: []*token.ResourceActions{
 			{Type: "repository", Name: "ns/img", Actions: []string{"pull"}},
 		},
 		Error: nil,

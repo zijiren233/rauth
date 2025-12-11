@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/distribution/distribution/v3/registry/auth/token"
 	"github.com/zijiren233/rauth/pkg/k8s"
 )
 
@@ -43,10 +44,10 @@ type AuthRequest struct {
 
 // AuthResult represents the result of authentication
 type AuthResult struct {
-	Authenticated bool     // true if credentials are valid
-	Subject       string   // username/namespace
-	Access        []Access // granted access (empty if no scope or unauthorized)
-	Error         error    // error if authentication or authorization failed
+	Authenticated bool                     // true if credentials are valid
+	Subject       string                   // username/namespace
+	Access        []*token.ResourceActions // granted access (empty if no scope or unauthorized)
+	Error         error                    // error if authentication or authorization failed
 }
 
 // Authenticate authenticates and authorizes a registry request
@@ -90,7 +91,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 	if req.Scope == "" {
 		a.logger.Info("no scope requested, returning empty access")
 
-		result.Access = []Access{}
+		result.Access = []*token.ResourceActions{}
 		return result
 	}
 
@@ -123,7 +124,7 @@ func (a *Authenticator) Authenticate(ctx context.Context, req *AuthRequest) *Aut
 		return result
 	}
 
-	result.Access = []Access{*access}
+	result.Access = []*token.ResourceActions{access}
 	a.logger.Info("authorization successful",
 		"username", req.Username,
 		"repository", access.Name,
@@ -145,7 +146,7 @@ func (a *Authenticator) verifyCredentials(
 
 // authorizeAccess checks if user can access the requested repository
 // username == namespace, so user can only access repos in their own namespace
-func (a *Authenticator) authorizeAccess(username string, requested *Access) bool {
+func (a *Authenticator) authorizeAccess(username string, requested *token.ResourceActions) bool {
 	// Extract namespace from repository name (format: namespace/image)
 	repoParts := strings.SplitN(requested.Name, "/", 2)
 	if len(repoParts) < 2 {
